@@ -1,0 +1,52 @@
+[
+    {
+        "Game": "The Legend of Zelda: Breath of the Wild",
+        "Platform": "Switch",
+        "Score": 98
+    },
+    {
+        "Game": "Super Mario Odyssey",
+        "Platform": "Switch",
+        "Score": 97
+    },
+    {
+        "Game": "Metroid Prime",
+        "Platform": "GameCube",
+        "Score": 97
+    },
+    {
+        "Game": "Super Smash Bros. Brawl",
+        "Platform": "Wii",
+        "Score": 93
+    },
+    {
+        "Game": "Mario Kart 8 Deluxe",
+        "Platform": "Switch",
+        "Score": 92
+    },
+    {
+        "Game": "Fire Emblem: Awakening",
+        "Platform": "3DS",
+        "Score": 92
+    },
+    {
+        "Game": "Donkey Kong Country Returns",
+        "Platform": "Wii",
+        "Score": 87
+    },
+    {
+        "Game": "Luigi's Mansion 3",
+        "Platform": "Switch",
+        "Score": 86
+    },
+    {
+        "Game": "Pikmin 3",
+        "Platform": "Wii U",
+        "Score": 85
+    },
+    {
+        "Game": "Animal Crossing: New Leaf",
+        "Platform": "3DS",
+        "Score": 88
+    }
+]
