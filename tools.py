@@ -18,7 +18,6 @@ tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 rag_llm = LLM(model="gpt-4o-mini", temperature=0.3)
 vector_store_manager = VectorStoreManager(os.getenv("OPENAI_API_KEY"))
-games_data_vector_store = vector_store_manager.create_store(store_name="games_data", force=True)
 long_term_memory = LongTermMemory(vector_store_manager)
 
 
@@ -39,8 +38,8 @@ def get_games(num_games:int=1, top:bool=True) -> str:
         # Return the N games
         return str(sorted_games[:num_games])
     
-games_data_vector_store.add(Document(content=get_games(num_games=10, top=True)))
-games_rag = RAG(llm=rag_llm, vector_store=games_data_vector_store)
+long_term_memory.vector_store.add(Document(content=get_games(num_games=10, top=True)))
+games_rag = RAG(llm=rag_llm, vector_store=long_term_memory.vector_store)
 
 @tool
 def retrieve_game(game_name:str) -> QueryResult:
