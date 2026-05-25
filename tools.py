@@ -11,15 +11,15 @@ from lib.rag import RAG
 import os
 from lib.vector_db import VectorStoreManager
 from lib.documents import Document
+from lib.tooling import Tool
+from lib.memory import LongTermMemory, MemoryFragment
 
 tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-
-
-db = VectorStoreManager(os.getenv("OPENAI_API_KEY"))
 
 rag_llm = LLM(model="gpt-4o-mini", temperature=0.3)
 vector_store_manager = VectorStoreManager(os.getenv("OPENAI_API_KEY"))
 games_data_vector_store = vector_store_manager.create_store(store_name="games_data", force=True)
+long_term_memory = LongTermMemory(vector_store_manager)
 
 
 @tool
@@ -103,3 +103,75 @@ def game_web_search(query: str, search_depth: str = "advanced") -> Dict:
     }
     
     return formatted_results
+
+def build_memory_registration_tool(ltm:LongTermMemory, owner:str, namespace:str):
+    """
+    Create a tool for agents to register new memories.
+    
+    This factory function creates a tool that allows AI agents to store new
+    information about users in the long-term memory system. The tool is
+    pre-configured with specific owner and namespace parameters.
+    
+    Args:
+        ltm (LongTermMemory): The memory system instance to use
+        owner (str): User identifier for memory ownership
+        namespace (str): Namespace for organizing memories
+        
+    Returns:
+        Tool: A configured tool for memory registration
+    """
+    def _register(content:str):
+        ltm.register(
+            MemoryFragment(
+                content=content, 
+                owner=owner,
+                namespace=namespace
+            )
+        )
+        return "Saved new memory"
+
+    return Tool(
+        func=_register, 
+        name="register_memory", 
+        description=(
+            "Register a new memory about the information of the game for future reference. "
+            "Args:\n"
+            "    content: The information to save"
+        )
+    )
+
+def build_memory_search_tool(ltm:LongTermMemory, owner:str, namespace:str):
+    """
+    Create a tool for agents to search existing memories.
+    
+    This factory function creates a tool that allows AI agents to retrieve
+    relevant memories from the long-term memory system based on semantic
+    similarity to a search query.
+    
+    Args:
+        ltm (LongTermMemory): The memory system instance to use
+        owner (str): User identifier for memory ownership
+        namespace (str): Namespace to search within
+        
+    Returns:
+        Tool: A configured tool for memory search
+    """
+    def _search(content:str):
+        result = ltm.search(
+            query_text=content,
+            owner=owner,
+            namespace=namespace,
+            limit=3,
+        )
+        return str(tuple(zip(result.fragments, result.metadata['distances'])))
+
+    return Tool(
+        func=_search, 
+        name="search_memory", 
+        description=(
+            "Search for a stored memory or preference about the game, " 
+            "so it's useful as a context.\n"
+            "Args:\n"
+            "    content: The information to look for"
+        )
+    )
