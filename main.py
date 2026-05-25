@@ -66,22 +66,34 @@ if __name__ == "__main__":
         ),
     )
 
-    # run1 = my_agent.invoke(
-    #     query="give me score and platform info about Evolve", session_id="session_1"
-    # )
+    run1 = my_agent.invoke(
+        query="give me score and platform info about Evolve", session_id="session_1"
+    )
 
     run2 = my_agent.invoke(
         query="give me score and platform info about Metroid", session_id="session_2"
     )
 
-    # run3 = my_agent.invoke(
-    #     query="give me score and platform info about Evolve", session_id="session_2"
-    # )
+    run3 = my_agent.invoke(
+        query="give me score and platform info about Evolve", session_id="session_2"
+    )
 
-    # run4 = my_agent.invoke(
-    #     query="give me score and platform info about Evolve", session_id="session_1"
-    # )
+    run4 = my_agent.invoke(
+        query="give me score and platform info about Evolve", session_id="session_1"
+    )
 
     print("\nMessages from run 1:")
-    # messages = run1.get_final_state()["messages"]
-    # _print_messages(messages)
+    messages = run1.get_final_state()["messages"]
+    _print_messages(messages)
+
+    print("\nMessages from run 2:")
+    messages = run2.get_final_state()["messages"]
+    _print_messages(messages)
+
+    print("\nMessages from run 3:")
+    messages = run3.get_final_state()["messages"]
+    _print_messages(messages)
+
+    print("\nMessages from run 4:")
+    messages = run4.get_final_state()["messages"]
+    _print_messages(messages)
