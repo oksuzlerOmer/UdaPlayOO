@@ -1,5 +1,4 @@
 import json
-from difflib import SequenceMatcher
 from lib.tooling import tool
 from lib.vector_db import VectorStore
 from tavily import TavilyClient
@@ -10,39 +9,55 @@ from lib.llm import LLM
 from lib.rag import RAG
 import os
 from lib.vector_db import VectorStoreManager
-from lib.documents import Document
+from lib.documents import Document, Corpus
 from lib.tooling import Tool
 from lib.memory import LongTermMemory, MemoryFragment
+from lib.evaluation import EvaluationReport
+from lib.parsers import PydanticOutputParser
 
 tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 rag_llm = LLM(model="gpt-4o-mini", temperature=0.3)
-vector_store_manager = VectorStoreManager(os.getenv("OPENAI_API_KEY"))
+CHROMA_PERSIST_DIR = os.path.join(os.path.abspath("."), "chroma_db")
+vector_store_manager = VectorStoreManager(
+    os.getenv("OPENAI_API_KEY"), persist_directory=CHROMA_PERSIST_DIR
+)
 long_term_memory = LongTermMemory(vector_store_manager)
 
+def _load_game_documents():
+    games_dir = os.path.join(os.path.abspath("."), "games")
+    documents = []
+    for filename in sorted(os.listdir(games_dir)):
+        if filename.endswith(".json"):
+            with open(os.path.join(games_dir, filename), "r", encoding="utf-8") as f:
+                g = json.load(f)
+            documents.append(
+                Document(
+                    content=(
+                        f"{g['Name']} is available on {g['Platform']}. "
+                        f"Genre: {g.get('Genre', 'Unknown')}. "
+                        f"Publisher: {g.get('Publisher', 'Unknown')}. "
+                        f"Year of release: {g.get('YearOfRelease', 'Unknown')}. "
+                        f"{g.get('Description', '')}"
+                    ),
+                    metadata={
+                        "game": g["Name"],
+                        "platform": g["Platform"],
+                        "genre": g.get("Genre", ""),
+                        "publisher": g.get("Publisher", ""),
+                        "year": g.get("YearOfRelease", ""),
+                    },
+                )
+            )
+    return Corpus(documents)
 
-@tool
-def get_games(num_games:int=1, top:bool=True) -> str:
-    """
-    Returns the top or bottom N games with highest or lowest scores.    
-    args:
-        num_games (int): Number of games to return (default is 1)
-        top (bool): If True, return top games, otherwise return bottom (default is True)
-    """
-    with open('games.json', 'r', encoding='utf-8') as f:
-        data = json.load(f)
-        # Sort the games list by Score
-        # If top is True, descending order
-        sorted_games = sorted(data, key=lambda x: x['Score'], reverse=top)
 
-        # Return the N games
-        return str(sorted_games[:num_games])
-    
-long_term_memory.vector_store.add(Document(content=get_games(num_games=10, top=True)))
+long_term_memory.vector_store.add(_load_game_documents())
 games_rag = RAG(llm=rag_llm, vector_store=long_term_memory.vector_store)
 
+
 @tool
-def retrieve_game(game_name:str) -> QueryResult:
+def retrieve_game(game_name: str) -> QueryResult:
     """
     Retrieves game information from the vector store based on the game name.
     args:
@@ -52,26 +67,32 @@ def retrieve_game(game_name:str) -> QueryResult:
     """
     return games_rag.invoke(game_name).get_final_state()["answer"]
 
-@tool
-def evaluate_retrieval(found_game_name:str, expected_game_name:str) -> float:
-    """
-    Evaluates the retrieval result by comparing the retrieved game name with the expected game name.
-    args:
-        found_game_name (str): The result of the retrieval query
-        expected_game_name (str): The expected game name to compare against
-    returns:
-        float: how similar the retrieved game name is to the expected game name in percentage
-    """
-    if not found_game_name:
-        return 0.0  # No documents retrieved, so similarity is 0%
-    
 
-    similarity = SequenceMatcher(
-        None,
-        found_game_name,
-        expected_game_name
-    ).ratio()
-    return round(similarity * 100, 2)
+@tool
+def evaluate_retrieval(question: str, retrieved_docs: str) -> dict:
+    """
+    Based on the user's question and on the list of retrieved documents,
+    it will analyze the usability of the documents to respond to that question.
+    args:
+        question (str): original question from user
+        retrieved_docs (str): retrieved documents most similar to the user query in the Vector Database
+    returns:
+        dict with:
+        - useful: whether the documents are useful to answer the question
+        - description: description about the evaluation result
+    """
+    judge_llm = LLM(model="gpt-4o-mini", temperature=0.0)
+    prompt = (
+        "Your task is to evaluate if the documents are enough to respond the query. "
+        "Give a detailed explanation, so it's possible to take an action to accept it or not.\n\n"
+        f"Query: {question}\n\n"
+        f"Retrieved Documents:\n{retrieved_docs}"
+    )
+    response = judge_llm.invoke(input=prompt, response_format=EvaluationReport)
+    parser = PydanticOutputParser(model_class=EvaluationReport)
+    result = parser.parse(response)
+    return {"useful": result.useful, "description": result.description}
+
 
 @tool
 def game_web_search(query: str, search_depth: str = "advanced") -> Dict:
@@ -81,96 +102,95 @@ def game_web_search(query: str, search_depth: str = "advanced") -> Dict:
         query (str): Search query
         search_depth (str): Type of search - 'basic' or 'advanced' (default: advanced)
     """
-    
+
     # Perform the search
     search_result = tavily_client.search(
         query=query,
         search_depth=search_depth,
         include_answer=True,
         include_raw_content=False,
-        include_images=False
+        include_images=False,
     )
-    
+
     # Format the results
     formatted_results = {
         "answer": search_result.get("answer", ""),
         "results": search_result.get("results", []),
-        "search_metadata": {
-            "timestamp": datetime.now().isoformat(),
-            "query": query
-        }
+        "citations": [
+            {"title": r.get("title", ""), "url": r.get("url", "")}
+            for r in search_result.get("results", [])
+        ],
+        "search_metadata": {"timestamp": datetime.now().isoformat(), "query": query},
     }
-    
+
     return formatted_results
 
-def build_memory_registration_tool(ltm:LongTermMemory, owner:str, namespace:str):
+
+def build_memory_registration_tool(ltm: LongTermMemory, owner: str, namespace: str):
     """
     Create a tool for agents to register new memories.
-    
+
     This factory function creates a tool that allows AI agents to store new
     information about users in the long-term memory system. The tool is
     pre-configured with specific owner and namespace parameters.
-    
+
     Args:
         ltm (LongTermMemory): The memory system instance to use
         owner (str): User identifier for memory ownership
         namespace (str): Namespace for organizing memories
-        
+
     Returns:
         Tool: A configured tool for memory registration
     """
-    def _register(content:str):
-        ltm.register(
-            MemoryFragment(
-                content=content, 
-                owner=owner,
-                namespace=namespace
-            )
-        )
+
+    def _register(content: str):
+        ltm.register(MemoryFragment(content=content, owner=owner, namespace=namespace))
         return "Saved new memory"
 
     return Tool(
-        func=_register, 
-        name="register_memory", 
+        func=_register,
+        name="register_memory",
         description=(
             "Register a new memory about the information of the game for future reference. "
             "Args:\n"
             "    content: The information to save"
-        )
+        ),
     )
 
-def build_memory_search_tool(ltm:LongTermMemory, owner:str, namespace:str):
+
+def build_memory_search_tool(ltm: LongTermMemory, owner: str, namespace: str):
     """
     Create a tool for agents to search existing memories.
-    
+
     This factory function creates a tool that allows AI agents to retrieve
     relevant memories from the long-term memory system based on semantic
     similarity to a search query.
-    
+
     Args:
         ltm (LongTermMemory): The memory system instance to use
         owner (str): User identifier for memory ownership
         namespace (str): Namespace to search within
-        
+
     Returns:
         Tool: A configured tool for memory search
     """
-    def _search(content:str):
+
+    def _search(content: str):
         result = ltm.search(
             query_text=content,
             owner=owner,
             namespace=namespace,
             limit=3,
         )
-        return str(tuple(zip(result.fragments, result.metadata['distances'])))
+        return str(tuple(zip(result.fragments, result.metadata["distances"])))
 
     return Tool(
-        func=_search, 
-        name="search_memory", 
+        func=_search,
+        name="search_memory",
         description=(
-            "Search for a stored memory or preference about the game, " 
+            "Search for a stored memory or preference about the game, "
             "so it's useful as a context.\n"
             "Args:\n"
             "    content: The information to look for"
-        )
+        ),
     )
